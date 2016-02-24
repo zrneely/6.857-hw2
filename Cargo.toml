@@ -1,0 +1,12 @@
+[package]
+name = "857miner"
+version = "0.1.0"
+authors = ["zrneely <zrneely@mit.edu>"]
+
+[dependencies]
+rust-crypto = "*"
+byteorder = "*"
+hyper = "*"
+rand = "*"
+rustc-serialize = "*"
+time = "*"
