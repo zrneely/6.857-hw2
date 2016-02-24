@@ -82,7 +82,7 @@ struct BlockForServer<'a> {
 
 impl Block {
 
-    /// Parses json into a block. 
+    /// Parses json into a block.
     fn new(json: Json) -> Block {
         let json = json.as_object().expect("response not object");
         Block {
@@ -205,11 +205,15 @@ impl Block {
         // panic!("Any method involving this function is way to fucking slow!");
     }
 
-    /// Find a valid proof of work (nonce triple) for this block.
-    fn solve(&mut self, rng: &mut rand::ThreadRng) {
+    /// Find a valid proof of work (nonce triple) for this block and returns
+    /// the number of hashes done while trying.
+    fn solve(&mut self, rng: &mut rand::ThreadRng) -> u64 {
+        let mut tries = 0;
         while !self.has_valid_proof_of_work() {
             self.randomize_nonces(rng);
+            tries += 1;
         }
+        tries * 3
     }
 
     /// Returns true when this block has a valid proof of work.
@@ -250,12 +254,17 @@ fn main() {
         let next_block = Block::get_next();
         let mut block = Block::make_block(&next_block, BLOCK.to_string());
         block.difficulty = 11;
-        println!("Got new block:\n\t{:?}", block);
+        println!("Got new block with difficulty {}", block.difficulty);
 
-        println!("\tBlock solved in {} seconds",
-                 time::Duration::span(|| block.solve(&mut rng)).num_seconds());
+        let mut num_hashes = 0;
+        let duration = time::Duration::span(|| {
+            num_hashes = block.solve(&mut rng);
+        }).num_milliseconds();
+        println!("\tSolved block in {} milliseconds ({} h/ms)\n\tNonces: {:?}",
+            duration,
+            num_hashes as i64 / duration,
+            block.nonces);
 
-        println!("\tSolved block! {:?}", block.nonces);
-        block.send_to_server(BLOCK.to_string());
+        // block.send_to_server(BLOCK.to_string());
     }
 }
