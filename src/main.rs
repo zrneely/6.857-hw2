@@ -232,6 +232,10 @@ impl Block {
 
     /// Returns true when this block has a valid proof of work.
     fn has_valid_proof_of_work(&self) -> bool {
+        if self.nonces[0] == self.nonces[1] || self.nonces[0] == self.nonces[2] ||
+           self.nonces[1] == self.nonces[2] {
+            return false;
+        }
         let max_full = self.difficulty / 8;
         let partial_mask = ((2u64.pow((self.difficulty % 8u64) as u32)) - 1) as u8;
         let hashes = [self.hash(0), self.hash(1), self.hash(2)];
@@ -247,10 +251,6 @@ impl Block {
         let byte1 = hashes[1][31 - max_full as usize] & partial_mask;
         let byte2 = hashes[2][31 - max_full as usize] & partial_mask;
         if !(byte0 == byte1 && byte1 == byte2) {
-            return false;
-        }
-        if self.nonces[0] == self.nonces[1] || self.nonces[0] == self.nonces[2] ||
-           self.nonces[1] == self.nonces[2] {
             return false;
         }
         println!("\tBlock has valid proof of work: {} {} {}",
