@@ -12,7 +12,7 @@ use crypto::sha2::Sha256;
 use hyper::client::{Body, Client};
 use rand::distributions::{IndependentSample, Range};
 use rustc_serialize::{Encodable, Encoder};
-use rustc_serialize::json::{Json};
+use rustc_serialize::json::Json;
 use rustc_serialize::hex::{FromHex, ToHex};
 
 use std::io::Read;
@@ -86,18 +86,30 @@ impl Block {
     fn new(json: Json) -> Block {
         let json = json.as_object().expect("response not object");
         Block {
-            version: json.get("version").expect("version not found")
-                .as_u64().expect("version not u64") as u8,
-            root: Hash(json.get("root").expect("root not found")
-                .as_string().expect("root not string")
-                .from_hex().expect("root not hex")),
-            parent_id: Hash(json.get("parentid").expect("parentid not found")
-                .as_string().expect("parentid not string")
-                .from_hex().expect("parentid not hex")),
-            difficulty: json.get("difficulty").expect("difficulty not found")
-                .as_u64().expect("difficulty not u64"),
-            timestamp: json.get("timestamp").expect("timestamp not found")
-                .as_u64().expect("timestamp not u64"),
+            version: json.get("version")
+                         .expect("version not found")
+                         .as_u64()
+                         .expect("version not u64") as u8,
+            root: Hash(json.get("root")
+                           .expect("root not found")
+                           .as_string()
+                           .expect("root not string")
+                           .from_hex()
+                           .expect("root not hex")),
+            parent_id: Hash(json.get("parentid")
+                                .expect("parentid not found")
+                                .as_string()
+                                .expect("parentid not string")
+                                .from_hex()
+                                .expect("parentid not hex")),
+            difficulty: json.get("difficulty")
+                            .expect("difficulty not found")
+                            .as_u64()
+                            .expect("difficulty not u64"),
+            timestamp: json.get("timestamp")
+                           .expect("timestamp not found")
+                           .as_u64()
+                           .expect("timestamp not u64"),
             nonces: [0; 3],
         }
     }
@@ -105,9 +117,9 @@ impl Block {
     /// Gets a template for the next block.
     fn get_next() -> Block {
         let mut result = Client::new()
-            .get(&format!("{}/next", NODE_URL))
-            .send()
-            .expect("result not ok");
+                             .get(&format!("{}/next", NODE_URL))
+                             .send()
+                             .expect("result not ok");
         assert_eq!(result.status, hyper::Ok);
         let input = {
             let mut input = String::new();
@@ -120,14 +132,16 @@ impl Block {
     /// Tries to post this block to the public ledger.
     fn send_to_server(&self, contents: String) {
         let block_for_server = rustc_serialize::json::encode(&BlockForServer {
-            header: &self,
-            block: contents,
-        }).unwrap();
+                                   header: &self,
+                                   block: contents,
+                               })
+                                   .unwrap();
         let mut result = Client::new()
-            .post(&format!("{}/add", NODE_URL))
-            .body(Body::BufBody(block_for_server.as_bytes(), block_for_server.len()))
-            .send()
-            .expect("result not ok");
+                             .post(&format!("{}/add", NODE_URL))
+                             .body(Body::BufBody(block_for_server.as_bytes(),
+                                                 block_for_server.len()))
+                             .send()
+                             .expect("result not ok");
         println!("\tSent block to server. Server Response: {}", {
             let mut response = String::new();
             result.read_to_string(&mut response).expect("could not read result");
@@ -235,8 +249,7 @@ impl Block {
         if !(byte0 == byte1 && byte1 == byte2) {
             return false;
         }
-        if self.nonces[0] == self.nonces[1] ||
-           self.nonces[0] == self.nonces[2] ||
+        if self.nonces[0] == self.nonces[1] || self.nonces[0] == self.nonces[2] ||
            self.nonces[1] == self.nonces[2] {
             return false;
         }
@@ -258,12 +271,13 @@ fn main() {
 
         let mut num_hashes = 0;
         let duration = time::Duration::span(|| {
-            num_hashes = block.solve(&mut rng);
-        }).num_milliseconds();
+                           num_hashes = block.solve(&mut rng);
+                       })
+                           .num_milliseconds();
         println!("\tSolved block in {} milliseconds ({} h/ms)\n\tNonces: {:?}",
-            duration,
-            num_hashes as i64 / duration,
-            block.nonces);
+                 duration,
+                 num_hashes as i64 / duration,
+                 block.nonces);
 
         // block.send_to_server(BLOCK.to_string());
     }
