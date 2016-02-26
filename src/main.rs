@@ -4,7 +4,11 @@ extern crate crypto;
 extern crate hyper;
 extern crate rand;
 extern crate rustc_serialize;
+#[macro_use]
+extern crate session_types;
 extern crate time;
+
+mod worker;
 
 use byteorder::{BigEndian, WriteBytesExt};
 use crypto::digest::Digest;
@@ -14,14 +18,20 @@ use rand::distributions::{IndependentSample, Range};
 use rustc_serialize::{Encodable, Encoder};
 use rustc_serialize::json::Json;
 use rustc_serialize::hex::{FromHex, ToHex};
+use session_types::{session_channel, Left, Right};
+
+use worker::worker;
 
 use std::io::Read;
 use std::fmt;
+use std::mem::replace;
 use std::ops::{Deref, Index, RangeFrom};
+use std::thread::spawn;
 
 /// The URL of the server
 const NODE_URL: &'static str = "http://6857coin.csail.mit.edu:8080";
-
+/// A tunable parameter; how many worker threads to spawn.
+const NUM_WORKERS: usize = 4;
 const BLOCK: &'static str = "Benjamin Xie, Emily Zhang, Zachary Neely";
 
 #[derive(Clone)]
@@ -63,8 +73,8 @@ macro_rules! be_expand {
     }};
 }
 
-#[derive(Debug, RustcEncodable)]
-struct Block {
+#[derive(Debug, RustcEncodable, Clone)]
+pub struct Block {
     version: u8,
     root: Hash,
     parent_id: Hash,
@@ -219,15 +229,18 @@ impl Block {
         // panic!("Any method involving this function is way to fucking slow!");
     }
 
-    /// Find a valid proof of work (nonce triple) for this block and returns
-    /// the number of hashes done while trying.
-    fn solve(&mut self, rng: &mut rand::ThreadRng) -> u64 {
+    /// Attempts to find a valid proof of work (nonce triple) for this block and returns
+    /// weather or not it was successful and the number of hashes done while trying.
+    pub fn attempt_solve(&mut self, rng: &mut rand::ThreadRng, max_tries: u64) -> (u64, bool) {
         let mut tries = 0;
-        while !self.has_valid_proof_of_work() {
+        while tries <= max_tries {
+            if self.has_valid_proof_of_work() {
+                return (tries * 3, true);
+            }
             self.randomize_nonces(rng);
             tries += 1;
         }
-        tries * 3
+        (tries * 3, false)
     }
 
     /// Returns true when this block has a valid proof of work.
@@ -262,23 +275,68 @@ impl Block {
 }
 
 fn main() {
-    let mut rng = rand::thread_rng();
+    // Keep trying to solve blocks forever
     loop {
         let next_block = Block::get_next();
-        let mut block = Block::make_block(&next_block, BLOCK.to_string());
-        block.difficulty = 11;
+        let block = Block::make_block(&next_block, BLOCK.to_string());
+        // block.difficulty = 11;
         println!("Got new block with difficulty {}", block.difficulty);
 
-        let mut num_hashes = 0;
-        let duration = time::Duration::span(|| {
-                           num_hashes = block.solve(&mut rng);
-                       })
-                           .num_milliseconds();
-        println!("\tSolved block in {} milliseconds ({} h/ms)\n\tNonces: {:?}",
-                 duration,
-                 num_hashes as i64 / duration,
-                 block.nonces);
+        println!("\tSpawning {} workers...", NUM_WORKERS);
+        let mut workers = Vec::with_capacity(NUM_WORKERS);
+        for i in 0..NUM_WORKERS {
+            let (c1, c2) = session_channel();
+            workers.push(Some((spawn(move || worker(c2, i)),
+                               c1.send(block.clone()).enter().sel2())));
+        }
 
-        // block.send_to_server(BLOCK.to_string());
+        let mut total_hashes = 0;
+        // Loop until a worker finishes
+        let mut solved = None;
+
+        let duration = time::Duration::span(|| {
+            while let None = solved {
+                'workers: for thing in workers.iter_mut() {
+                    let (thread, c) = thing.take().unwrap();
+                    let c = offer! { c,
+                        SOLVED => {
+                            let (c, solved_block) = c.recv();
+                            replace(&mut solved, Some(solved_block));
+                            c.close();
+                            total_hashes += thread.join().unwrap();
+                            break 'workers;
+                        },
+                        UNSOLVED => { c.zero().sel2() }
+                    };
+                    replace(thing, Some((thread, c)));
+                }
+            }
+
+            println!("\tFinished, termintating other workers...");
+            for thing in workers.iter_mut() {
+                if let Some((thread, c)) = thing.take() {
+                    offer! { c,
+                        SOLVED => {
+                            // whoops, solved it an extra time
+                            let (c, _) = c.recv();
+                            c.close();
+                            total_hashes += thread.join().unwrap();
+                        },
+                        UNSOLVED => {
+                            c.zero().sel1().close();
+                            total_hashes += thread.join().unwrap();
+                        }
+                    };
+                }
+            }
+        }).num_milliseconds();
+
+        let solved = solved.unwrap();
+        println!("\tSolved block in {} milliseconds ({} hashses/ms)\n\tNonces: {:?}\n\n\n",
+                 duration,
+                 total_hashes as i64 / duration,
+                 solved.nonces);
+
+        block.send_to_server(BLOCK.to_string());
     }
 }
