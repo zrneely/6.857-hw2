@@ -16,7 +16,7 @@ use crypto::sha2::Sha256;
 use hyper::client::{Body, Client};
 use rand::distributions::{IndependentSample, Range};
 use rustc_serialize::{Encodable, Encoder};
-use rustc_serialize::json::Json;
+use rustc_serialize::json::{encode, Json};
 use rustc_serialize::hex::{FromHex, ToHex};
 use session_types::{session_channel, Left, Right};
 
@@ -141,7 +141,7 @@ impl Block {
 
     /// Tries to post this block to the public ledger.
     fn send_to_server(&self, contents: String) {
-        let block_for_server = rustc_serialize::json::encode(&BlockForServer {
+        let block_for_server = encode(&BlockForServer {
                                    header: &self,
                                    block: contents,
                                })
@@ -301,7 +301,7 @@ fn main() {
                     let c = offer! { c,
                         SOLVED => {
                             let (c, solved_block) = c.recv();
-                            replace(&mut solved, Some(solved_block));
+                            solved = Some(solved_block);
                             c.close();
                             total_hashes += thread.join().unwrap();
                             break 'workers;
