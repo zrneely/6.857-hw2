@@ -33,7 +33,7 @@ use std::thread::spawn;
 const NODE_URL: &'static str = "http://6857coin.csail.mit.edu:8080";
 /// A tunable parameter; how many worker threads to spawn.
 const NUM_WORKERS: usize = 100;
-const BLOCK: &'static str = "Benjamin Xie, Emily Zhang, Zachary Neely";
+const BLOCK: &'static str = "bxie, emzhang, zrneely";
 
 #[derive(Clone)]
 struct Hash(Vec<u8>);
@@ -76,7 +76,7 @@ impl Hash {
 macro_rules! be_expand {
     ($x:expr) => {{
         let mut tmp = vec![];
-        tmp.write_u64::<BigEndian>($x).expect("wtf");
+        tmp.write_u64::<BigEndian>($x).unwrap();
         tmp
     }};
 }
@@ -294,7 +294,15 @@ fn main() {
     let mut start_time = time::now();
     // Keep trying to solve blocks forever
     loop {
-        // println!("\tSpawning {} workers...", NUM_WORKERS);
+        // If we've taken too long, start over
+        if (time::now() - start_time).num_minutes() >= 10 {
+            println!("Taken too long; restarting.");
+            next_block = Block::get_next();
+            block = Block::make_block(&next_block, BLOCK.to_string());
+            total_hashes = 0;
+            start_time = time::now();
+        }
+
         let mut workers_triple_send = Vec::with_capacity(NUM_WORKERS);
         for _ in 0..NUM_WORKERS {
             let (c1, c2) = session_channel();
@@ -348,10 +356,14 @@ fn main() {
         }
 
         if block.has_valid_proof_of_work() {
-            let duration = (time::now() - start_time).num_milliseconds();
-            println!("\tSolved block in {} milliseconds ({} hashses/ms)\n\tNonces: {:?}",
+            let duration = (time::now() - start_time).num_seconds();
+            println!("\tSolved block in {} seconds ({} hashes/sec)\n\tNonces: {:?}",
                      duration,
-                     total_hashes as i64 / duration,
+                     if duration == 0 {
+                         total_hashes as i64
+                     } else {
+                         total_hashes as i64 / duration
+                     },
                      block.nonces);
 
             block.send_to_server(BLOCK.to_string());

@@ -34,7 +34,7 @@ dependencies = [
 
 [[package]]
 name = "gcc"
-version = "0.3.24"
+version = "0.3.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
@@ -157,7 +157,7 @@ version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "bitflags 0.3.3 (registry+https://github.com/rust-lang/crates.io-index)",
- "gcc 0.3.24 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gcc 0.3.25 (registry+https://github.com/rust-lang/crates.io-index)",
  "lazy_static 0.1.15 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.7 (registry+https://github.com/rust-lang/crates.io-index)",
  "openssl-sys 0.7.6 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -181,7 +181,7 @@ name = "openssl-sys-extras"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
- "gcc 0.3.24 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gcc 0.3.25 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.7 (registry+https://github.com/rust-lang/crates.io-index)",
  "openssl-sys 0.7.6 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
@@ -212,7 +212,7 @@ name = "rust-crypto"
 version = "0.2.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
- "gcc 0.3.24 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gcc 0.3.25 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.1.12 (registry+https://github.com/rust-lang/crates.io-index)",
  "rand 0.3.14 (registry+https://github.com/rust-lang/crates.io-index)",
  "rustc-serialize 0.3.18 (registry+https://github.com/rust-lang/crates.io-index)",
