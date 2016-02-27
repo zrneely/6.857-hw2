@@ -14,7 +14,6 @@ use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
 use crypto::digest::Digest;
 use crypto::sha2::Sha256;
 use hyper::client::{Body, Client};
-use rand::distributions::{IndependentSample, Range};
 use rustc_serialize::{Encodable, Encoder};
 use rustc_serialize::json::{encode, Json};
 use rustc_serialize::hex::{FromHex, ToHex};
@@ -233,56 +232,22 @@ impl Block {
         }
     }
 
-    /// Sets the 3 nonces to random values
-    fn randomize_nonces(&mut self, rng: &mut rand::ThreadRng) {
-        let range = Range::new(0, 2u64.pow(self.difficulty as u32));
-        self.nonces[0] = range.ind_sample(rng);
-        self.nonces[1] = range.ind_sample(rng);
-        self.nonces[2] = range.ind_sample(rng);
-        panic!("Any method involving this function is way to slow!");
-    }
-
-    /// Attempts to find a valid proof of work (nonce triple) for this block and returns
-    /// weather or not it was successful and the number of hashes done while trying.
-    pub fn attempt_solve(&mut self, rng: &mut rand::ThreadRng, max_tries: u64) -> (u64, bool) {
-        let mut tries = 0;
-        while tries <= max_tries {
-            if self.has_valid_proof_of_work() {
-                return (tries * 3, true);
-            }
-            self.randomize_nonces(rng);
-            tries += 1;
-        }
-        (tries * 3, false)
-    }
-
     /// Returns true when this block has a valid proof of work.
     fn has_valid_proof_of_work(&self) -> bool {
         if self.nonces[0] == self.nonces[1] || self.nonces[0] == self.nonces[2] ||
            self.nonces[1] == self.nonces[2] {
             return false;
         }
-        let max_full = self.difficulty / 8;
-        let partial_mask = ((2u64.pow((self.difficulty % 8u64) as u32)) - 1) as u8;
-        let hashes = [self.hash(0), self.hash(1), self.hash(2)];
-        for i in 0..max_full {
-            let byte0 = hashes[0][31 - i as usize];
-            let byte1 = hashes[1][31 - i as usize];
-            let byte2 = hashes[2][31 - i as usize];
-            if !(byte0 == byte1 && byte1 == byte2) {
-                return false;
-            }
-        }
-        let byte0 = hashes[0][31 - max_full as usize] & partial_mask;
-        let byte1 = hashes[1][31 - max_full as usize] & partial_mask;
-        let byte2 = hashes[2][31 - max_full as usize] & partial_mask;
-        if !(byte0 == byte1 && byte1 == byte2) {
+        let hashes = [
+            self.hash(0).to_u64(self.difficulty),
+            self.hash(1).to_u64(self.difficulty),
+            self.hash(2).to_u64(self.difficulty)
+        ];
+        if !(hashes[0] == hashes[1] && hashes[1] == hashes[2]) {
             return false;
         }
         println!("\tBlock has valid proof of work: {} {} {}",
-                 hashes[0][(31 - (max_full / 2 + 1)) as usize..].to_hex(),
-                 hashes[1][(31 - (max_full / 2 + 1)) as usize..].to_hex(),
-                 hashes[2][(31 - (max_full / 2 + 1)) as usize..].to_hex());
+                 hashes[0], hashes[1], hashes[2]);
         true
     }
 }
