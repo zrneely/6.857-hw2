@@ -10,7 +10,7 @@ extern crate time;
 
 mod worker;
 
-use byteorder::{BigEndian, WriteBytesExt};
+use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
 use crypto::digest::Digest;
 use crypto::sha2::Sha256;
 use hyper::client::{Body, Client};
@@ -22,6 +22,7 @@ use session_types::{session_channel, Left, Right};
 
 use worker::worker;
 
+use std::collections::HashMap;
 use std::io::Read;
 use std::fmt;
 use std::mem::replace;
@@ -31,7 +32,7 @@ use std::thread::spawn;
 /// The URL of the server
 const NODE_URL: &'static str = "http://6857coin.csail.mit.edu:8080";
 /// A tunable parameter; how many worker threads to spawn.
-const NUM_WORKERS: usize = 4;
+const NUM_WORKERS: usize = 100;
 const BLOCK: &'static str = "Benjamin Xie, Emily Zhang, Zachary Neely";
 
 #[derive(Clone)]
@@ -62,6 +63,13 @@ impl Index<RangeFrom<usize>> for Hash {
     type Output = [u8];
     fn index(&self, index: RangeFrom<usize>) -> &Self::Output {
         &self.0[index]
+    }
+}
+impl Hash {
+    fn to_u64(mut self, difficulty: u64) -> u64 {
+        let mask = 2u64.pow(difficulty as u32) - 1;
+        self.0.reverse();
+        (&self.0[..]).read_u64::<LittleEndian>().unwrap() & mask
     }
 }
 
@@ -123,7 +131,6 @@ impl Block {
             nonces: [0; 3],
         }
     }
-
     /// Gets a template for the next block.
     fn get_next() -> Block {
         let mut result = Client::new()
@@ -136,7 +143,9 @@ impl Block {
             result.read_to_string(&mut input).expect("could not read result");
             Json::from_str(&input).expect("result not valid json")
         };
-        Block::new(input)
+        let block = Block::new(input);
+        println!("Got new block with difficulty {}", block.difficulty);
+        block
     }
 
     /// Tries to post this block to the public ledger.
@@ -152,7 +161,7 @@ impl Block {
                                                  block_for_server.len()))
                              .send()
                              .expect("result not ok");
-        println!("\tSent block to server. Server Response: {}", {
+        println!("\tSent block to server. Server Response: {}\n\n", {
             let mut response = String::new();
             result.read_to_string(&mut response).expect("could not read result");
             response
@@ -161,13 +170,17 @@ impl Block {
 
     /// Hashes a block using the specified nonce.
     fn hash(&self, i: usize) -> Hash {
+        self.hash_with_nonce(self.nonces[i])
+    }
+
+    fn hash_with_nonce(&self, nonce: u64) -> Hash {
         let mut digest = Sha256::new();
 
         digest.input(&self.parent_id);
         digest.input(&self.root);
         digest.input(&be_expand!(self.difficulty));
         digest.input(&be_expand!(self.timestamp));
-        digest.input(&be_expand!(self.nonces[i]));
+        digest.input(&be_expand!(nonce));
         digest.input(&[self.version]);
 
         let mut hash = vec![0u8; 32];
@@ -226,7 +239,7 @@ impl Block {
         self.nonces[0] = range.ind_sample(rng);
         self.nonces[1] = range.ind_sample(rng);
         self.nonces[2] = range.ind_sample(rng);
-        // panic!("Any method involving this function is way to fucking slow!");
+        panic!("Any method involving this function is way to slow!");
     }
 
     /// Attempts to find a valid proof of work (nonce triple) for this block and returns
@@ -275,68 +288,77 @@ impl Block {
 }
 
 fn main() {
+    let mut total_hashes = 0;
+    let mut next_block = Block::get_next();
+    let mut block = Block::make_block(&next_block, BLOCK.to_string());
+    let mut start_time = time::now();
     // Keep trying to solve blocks forever
     loop {
-        let next_block = Block::get_next();
-        let block = Block::make_block(&next_block, BLOCK.to_string());
-        // block.difficulty = 11;
-        println!("Got new block with difficulty {}", block.difficulty);
-
-        println!("\tSpawning {} workers...", NUM_WORKERS);
-        let mut workers = Vec::with_capacity(NUM_WORKERS);
-        for i in 0..NUM_WORKERS {
+        // println!("\tSpawning {} workers...", NUM_WORKERS);
+        let mut workers_triple_send = Vec::with_capacity(NUM_WORKERS);
+        for _ in 0..NUM_WORKERS {
             let (c1, c2) = session_channel();
-            workers.push(Some((spawn(move || worker(c2, i)),
-                               c1.send(block.clone()).enter().sel2())));
+            workers_triple_send.push(Some((spawn(move || worker(c2)),
+                               c1.send(block.clone()))));
         }
 
-        let mut total_hashes = 0;
-        // Loop until a worker finishes
-        let mut solved = None;
-
-        let duration = time::Duration::span(|| {
-            while let None = solved {
-                'workers: for thing in workers.iter_mut() {
-                    let (thread, c) = thing.take().unwrap();
-                    let c = offer! { c,
-                        SOLVED => {
-                            let (c, solved_block) = c.recv();
-                            solved = Some(solved_block);
-                            c.close();
-                            total_hashes += thread.join().unwrap();
-                            break 'workers;
-                        },
-                        UNSOLVED => { c.zero().sel2() }
-                    };
-                    replace(thing, Some((thread, c)));
+        let mut map = HashMap::new();
+        for i in 0..NUM_WORKERS as u64 {
+            map.insert(i, Box::new(Vec::new()));
+        }
+        // First, get triples from all the workers
+        let mut workers_triples_send = Vec::with_capacity(NUM_WORKERS);
+        for mut worker in workers_triple_send.into_iter() {
+            let (thread, c) = worker.take().unwrap();
+            let c = offer! { c,
+                FOUND_TRIPLE => {
+                    let (c, triple) = c.recv();
+                    let target_worker = triple.end_point % NUM_WORKERS as u64;
+                    let current_triples = map.get_mut(&target_worker).unwrap();
+                    current_triples.push(triple);
+                    c
+                },
+                NO_TRIPLE => {
+                    c.close();
+                    total_hashes += thread.join().unwrap();
+                    continue;
+                }
+            };
+            workers_triples_send.push(Some((thread, c)));
+        }
+        // Send the triples to the appropriate workers
+        let mut finished_workers = Vec::with_capacity(NUM_WORKERS);
+        for i in 0..workers_triples_send.len() {
+            let (thread, c) = workers_triples_send[i].take().unwrap();
+            let c = c.send(replace(map.get_mut(&(i as u64)).unwrap(), vec![]));
+            finished_workers.push(Some((thread, c)));
+        }
+        // Check the responses to see if we got any collisions
+        for mut worker in finished_workers.into_iter() {
+            let (thread, c) = worker.take().unwrap();
+            let (c, result) = c.recv();
+            if let Some(collision) = result {
+                println!("Worker found collision!");
+                for i in 0..3 {
+                    block.nonces[i] = collision[i];
                 }
             }
+            c.close();
+            total_hashes += thread.join().unwrap();
+        }
 
-            println!("\tFinished, termintating other workers...");
-            for thing in workers.iter_mut() {
-                if let Some((thread, c)) = thing.take() {
-                    offer! { c,
-                        SOLVED => {
-                            // whoops, solved it an extra time
-                            let (c, _) = c.recv();
-                            c.close();
-                            total_hashes += thread.join().unwrap();
-                        },
-                        UNSOLVED => {
-                            c.zero().sel1().close();
-                            total_hashes += thread.join().unwrap();
-                        }
-                    };
-                }
-            }
-        }).num_milliseconds();
+        if block.has_valid_proof_of_work() {
+            let duration = (time::now() - start_time).num_milliseconds();
+            println!("\tSolved block in {} milliseconds ({} hashses/ms)\n\tNonces: {:?}",
+                     duration,
+                     total_hashes as i64 / duration,
+                     block.nonces);
 
-        let solved = solved.unwrap();
-        println!("\tSolved block in {} milliseconds ({} hashses/ms)\n\tNonces: {:?}\n\n\n",
-                 duration,
-                 total_hashes as i64 / duration,
-                 solved.nonces);
-
-        block.send_to_server(BLOCK.to_string());
+            block.send_to_server(BLOCK.to_string());
+            next_block = Block::get_next();
+            block = Block::make_block(&next_block, BLOCK.to_string());
+            total_hashes = 0;
+            start_time = time::now();
+        }
     }
 }
