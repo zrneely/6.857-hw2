@@ -10,7 +10,7 @@ use Block;
 pub struct Triple {
     pub start_point: u64,
     pub end_point: u64,
-    pub chain_length: u64
+    pub chain_length: u64,
 }
 
 pub type SendTriple = Choose<Send<Triple, RecvTriples>, RecvTriples>;
@@ -24,8 +24,8 @@ pub fn worker(c: Chan<(), Recv<Block, SendTriple>>) -> u64 {
     let mut hashes = 0;
 
     // max_distinguished = 2^(2N/3)
-    let max_distinguished = 2f64.powf(
-        2f64 * (block.difficulty as f64 / 3f64)).ceil() as u64;
+    let max_distinguished = 2f64.powf(2f64 * (block.difficulty as f64 / 3f64))
+                                .ceil() as u64;
     // max_length = 20 * 2^(N/3)
     let max_length = 20 * 2f64.powf(block.difficulty as f64 / 3f64).ceil() as u64;
 
@@ -65,27 +65,30 @@ fn acquire_triples(c: Chan<(), RecvTriples>, block: Block) -> u64 {
             j += 1;
         }
         if j >= i + 3 {
-            let max_length = (&triples[i..j-1]).iter()
-                .map(|&Triple { chain_length, .. }| chain_length).max().unwrap();
+            let max_length = (&triples[i..j - 1])
+                                 .iter()
+                                 .map(|&Triple { chain_length, .. }| chain_length)
+                                 .max()
+                                 .unwrap();
             for length in (0..max_length).rev() {
-                for k in i..j-1 {
+                for k in i..j - 1 {
                     if triples[k].chain_length >= length {
                         triples[k].end_point = triples[k].start_point;
-                        triples[k].start_point =
-                            block.hash_with_nonce(triples[k].start_point).to_u64(block.difficulty);
+                        triples[k].start_point = block.hash_with_nonce(triples[k].start_point)
+                                                      .to_u64(block.difficulty);
                         hashes += 1;
                     }
                 }
                 // Check for 3 values in the triples where the start points are the same and
                 // the end points are different
                 let mut starts = HashSet::new();
-                for triple in &triples[i..j-1] {
+                for triple in &triples[i..j - 1] {
                     starts.insert(triple.start_point);
                 }
                 for start in starts {
                     let mut ends = HashSet::new();
                     let mut points = Vec::new();
-                    for triple in &triples[i..j-1] {
+                    for triple in &triples[i..j - 1] {
                         if triple.start_point == start && ends.insert(triple.end_point) {
                             points.push(triple.end_point);
                         }

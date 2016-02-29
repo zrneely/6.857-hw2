@@ -238,16 +238,16 @@ impl Block {
            self.nonces[1] == self.nonces[2] {
             return false;
         }
-        let hashes = [
-            self.hash(0).to_u64(self.difficulty),
-            self.hash(1).to_u64(self.difficulty),
-            self.hash(2).to_u64(self.difficulty)
-        ];
+        let hashes = [self.hash(0).to_u64(self.difficulty),
+                      self.hash(1).to_u64(self.difficulty),
+                      self.hash(2).to_u64(self.difficulty)];
         if !(hashes[0] == hashes[1] && hashes[1] == hashes[2]) {
             return false;
         }
         println!("\tBlock has valid proof of work: {} {} {}",
-                 hashes[0], hashes[1], hashes[2]);
+                 hashes[0],
+                 hashes[1],
+                 hashes[2]);
         true
     }
 }
@@ -271,13 +271,12 @@ fn main() {
         let mut workers_triple_send = Vec::with_capacity(NUM_WORKERS);
         for _ in 0..NUM_WORKERS {
             let (c1, c2) = session_channel();
-            workers_triple_send.push(Some((spawn(move || worker(c2)),
-                               c1.send(block.clone()))));
+            workers_triple_send.push(Some((spawn(move || worker(c2)), c1.send(block.clone()))));
         }
 
         let mut map = HashMap::new();
         for i in 0..NUM_WORKERS as u64 {
-            map.insert(i, Box::new(Vec::new()));
+            map.insert(i, Vec::new());
         }
         // First, get triples from all the workers
         let mut workers_triples_send = Vec::with_capacity(NUM_WORKERS);
