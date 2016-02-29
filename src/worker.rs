@@ -13,7 +13,7 @@ pub struct Triple {
     pub chain_length: u64
 }
 
-pub type SendTriple = Choose<Send<Triple, RecvTriples>, Eps>;
+pub type SendTriple = Choose<Send<Triple, RecvTriples>, RecvTriples>;
 pub type RecvTriples = Recv<Vec<Triple>, Send<Results, Eps>>;
 pub type Results = Option<Vec<u64>>;
 
@@ -45,8 +45,7 @@ pub fn worker(c: Chan<(), Recv<Block, SendTriple>>) -> u64 {
             return hashes + acquire_triples(c, block);
         }
     }
-    c.sel2().close();
-    return hashes;
+    return hashes + acquire_triples(c.sel2(), block);
 }
 
 fn acquire_triples(c: Chan<(), RecvTriples>, block: Block) -> u64 {

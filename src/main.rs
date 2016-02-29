@@ -291,11 +291,7 @@ fn main() {
                     current_triples.push(triple);
                     c
                 },
-                NO_TRIPLE => {
-                    c.close();
-                    total_hashes += thread.join().unwrap();
-                    continue;
-                }
+                NO_TRIPLE => { c }
             };
             workers_triples_send.push(Some((thread, c)));
         }
