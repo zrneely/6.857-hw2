@@ -4,34 +4,30 @@ extern crate crypto;
 extern crate hyper;
 extern crate rand;
 extern crate rustc_serialize;
-#[macro_use]
-extern crate session_types;
 extern crate time;
 
 mod worker;
 
-use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
+use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use crypto::digest::Digest;
 use crypto::sha2::Sha256;
 use hyper::client::{Body, Client};
 use rustc_serialize::{Encodable, Encoder};
 use rustc_serialize::json::{encode, Json};
 use rustc_serialize::hex::{FromHex, ToHex};
-use session_types::{session_channel, Left, Right};
 
-use worker::worker;
+use worker::{memory_intensive_worker, Queue};
 
-use std::collections::HashMap;
 use std::io::Read;
 use std::fmt;
-use std::mem::replace;
 use std::ops::{Deref, Index, RangeFrom};
-use std::thread::spawn;
+use std::thread::{spawn, yield_now};
+use std::sync::{Arc, RwLock};
 
 /// The URL of the server
 const NODE_URL: &'static str = "http://6857coin.csail.mit.edu:8080";
 /// A tunable parameter; how many worker threads to spawn.
-const NUM_WORKERS: usize = 100;
+const NUM_WORKERS: usize = 4;
 const BLOCK: &'static str = "bxie, emzhang, zrneely";
 
 #[derive(Clone)]
@@ -65,10 +61,9 @@ impl Index<RangeFrom<usize>> for Hash {
     }
 }
 impl Hash {
-    fn to_u64(mut self, difficulty: u64) -> u64 {
+    fn to_u64(self, difficulty: u64) -> u64 {
         let mask = 2u64.pow(difficulty as u32) - 1;
-        self.0.reverse();
-        (&self.0[..]).read_u64::<LittleEndian>().unwrap() & mask
+        (&self.0[24..]).read_u64::<BigEndian>().unwrap() & mask
     }
 }
 
@@ -100,7 +95,7 @@ struct BlockForServer<'a> {
 impl Block {
 
     /// Parses json into a block.
-    fn new(json: Json) -> Block {
+    fn new(json: &Json) -> Block {
         let json = json.as_object().expect("response not object");
         Block {
             version: json.get("version")
@@ -142,8 +137,28 @@ impl Block {
             result.read_to_string(&mut input).expect("could not read result");
             Json::from_str(&input).expect("result not valid json")
         };
-        let block = Block::new(input);
+        let block = Block::new(&input);
         println!("Got new block with difficulty {}", block.difficulty);
+        block
+    }
+
+    /// Gets the origin block
+    fn get_origin() -> Block {
+        let mut result = Client::new()
+            .get("http://6857coin.csail.mit.edu:8080/block/169740d5c4711f3cbbde6b9bfbbe8b3d236879d849d1c137660fce9e7884cae7")
+            .send()
+            .expect("result not ok");
+        assert_eq!(result.status, hyper::Ok);
+        let input = {
+            let mut input = String::new();
+            result.read_to_string(&mut input).expect("could not read result");
+            Json::from_str(&input).expect("result not valid json")
+        };
+        let input = input.as_object().expect("response not object")
+            .get("header")
+            .expect("header not found");
+        let block = Block::new(input);
+        println!("Got origin block with difficulty {}", block.difficulty);
         block
     }
 
@@ -221,11 +236,12 @@ impl Block {
                 digest.result(&mut hash);
                 Hash(hash)
             },
-            parent_id: next.parent_id.clone(),
+            parent_id: next.hash_for_explorer(),
             timestamp: {
                 // nanoseconds since epoch
                 let time = time::now().to_timespec();
                 (time.sec as u64) * 1000000000u64 + (time.nsec as u64)
+                    + 5 * 60 * 1000 * 1000 * 1000
             },
             difficulty: next.difficulty,
             nonces: [0; 3],
@@ -236,6 +252,7 @@ impl Block {
     fn has_valid_proof_of_work(&self) -> bool {
         if self.nonces[0] == self.nonces[1] || self.nonces[0] == self.nonces[2] ||
            self.nonces[1] == self.nonces[2] {
+            println!("nonces are equal!");
             return false;
         }
         let hashes = [self.hash(0).to_u64(self.difficulty),
@@ -253,84 +270,41 @@ impl Block {
 }
 
 fn main() {
-    let mut total_hashes = 0;
-    let mut next_block = Block::get_next();
-    let mut block = Block::make_block(&next_block, BLOCK.to_string());
-    let mut start_time = time::now();
+    let mut start_time;
+    let queue = Arc::new(RwLock::new(Queue {
+        input_block: {
+            start_time = time::now();
+            let next_block = Block::get_origin();
+            Block::make_block(&next_block, BLOCK.to_string())
+        },
+        solved_blocks: Vec::new(),
+        most_recent: time::now(),
+    }));
+    for _ in 0..NUM_WORKERS {
+        let queue_clone = queue.clone();
+        spawn(|| memory_intensive_worker(queue_clone, 0.666f64, 0.667f64));
+    }
     // Keep trying to solve blocks forever
     loop {
-        // If we've taken too long, start over
-        if (time::now() - start_time).num_minutes() >= 10 {
-            println!("Taken too long; restarting.");
-            next_block = Block::get_next();
-            block = Block::make_block(&next_block, BLOCK.to_string());
-            total_hashes = 0;
-            start_time = time::now();
-        }
-
-        let mut workers_triple_send = Vec::with_capacity(NUM_WORKERS);
-        for _ in 0..NUM_WORKERS {
-            let (c1, c2) = session_channel();
-            workers_triple_send.push(Some((spawn(move || worker(c2)), c1.send(block.clone()))));
-        }
-
-        let mut map = HashMap::new();
-        for i in 0..NUM_WORKERS as u64 {
-            map.insert(i, Vec::new());
-        }
-        // First, get triples from all the workers
-        let mut workers_triples_send = Vec::with_capacity(NUM_WORKERS);
-        for mut worker in workers_triple_send.into_iter() {
-            let (thread, c) = worker.take().unwrap();
-            let c = offer! { c,
-                FOUND_TRIPLE => {
-                    let (c, triple) = c.recv();
-                    let target_worker = triple.end_point % NUM_WORKERS as u64;
-                    let current_triples = map.get_mut(&target_worker).unwrap();
-                    current_triples.push(triple);
-                    c
-                },
-                NO_TRIPLE => { c }
+        yield_now();
+        if (time::now() - start_time).num_minutes() >= 9 {
+            let mut queue = queue.write().unwrap();
+            queue.input_block = {
+                println!("Took too long...");
+                start_time = time::now();
+                let next_block = Block::get_origin();
+                Block::make_block(&next_block, BLOCK.to_string())
             };
-            workers_triples_send.push(Some((thread, c)));
+            queue.most_recent = time::now();
         }
-        // Send the triples to the appropriate workers
-        let mut finished_workers = Vec::with_capacity(NUM_WORKERS);
-        for i in 0..workers_triples_send.len() {
-            let (thread, c) = workers_triples_send[i].take().unwrap();
-            let c = c.send(replace(map.get_mut(&(i as u64)).unwrap(), vec![]));
-            finished_workers.push(Some((thread, c)));
-        }
-        // Check the responses to see if we got any collisions
-        for mut worker in finished_workers.into_iter() {
-            let (thread, c) = worker.take().unwrap();
-            let (c, result) = c.recv();
-            if let Some(collision) = result {
-                println!("Worker found collision!");
-                for i in 0..3 {
-                    block.nonces[i] = collision[i];
-                }
+        yield_now();
+        {
+            let mut queue = queue.write().unwrap();
+            for block in queue.solved_blocks.drain(..) {
+                assert!(block.has_valid_proof_of_work());
+                println!("{:?}", block);
+                block.send_to_server(BLOCK.to_string());
             }
-            c.close();
-            total_hashes += thread.join().unwrap();
-        }
-
-        if block.has_valid_proof_of_work() {
-            let duration = (time::now() - start_time).num_seconds();
-            println!("\tSolved block in {} seconds ({} hashes/sec)\n\tNonces: {:?}",
-                     duration,
-                     if duration == 0 {
-                         total_hashes as i64
-                     } else {
-                         total_hashes as i64 / duration
-                     },
-                     block.nonces);
-
-            block.send_to_server(BLOCK.to_string());
-            next_block = Block::get_next();
-            block = Block::make_block(&next_block, BLOCK.to_string());
-            total_hashes = 0;
-            start_time = time::now();
         }
     }
 }
