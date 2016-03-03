@@ -285,7 +285,8 @@ impl Block {
             timestamp: {
                 // nanoseconds since epoch
                 let time = time::now().to_timespec();
-                (time.sec as u64) * 1000000000u64 + (time.nsec as u64)
+                (time.sec as u64) * (1000 * 1000 * 1000) + (time.nsec as u64)
+                    + (5 * 60 * 1000 * 1000 * 1000)
             },
             difficulty: next.difficulty,
             nonces: [0; 3],
