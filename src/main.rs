@@ -29,6 +29,8 @@ const NODE_URL: &'static str = "http://6857coin.csail.mit.edu:8080";
 /// A tunable parameter; how many worker threads to spawn.
 const NUM_WORKERS: usize = 4;
 const BLOCK: &'static str = "bxie, emzhang, zrneely";
+/// The number of minutes to try to solve a block for.
+const MAX_TIME_TO_ATTEMPT: i64 = 9;
 
 #[derive(Clone)]
 struct Hash(Vec<u8>);
@@ -67,12 +69,46 @@ impl Hash {
     }
 }
 
-macro_rules! be_expand {
-    ($x:expr) => {{
-        let mut tmp = vec![];
-        tmp.write_u64::<BigEndian>($x).unwrap();
-        tmp
-    }};
+#[cfg(test)]
+mod tests {
+    use super::{be_expand, Hash};
+    #[test]
+    fn to_u64() {
+        let hash = Hash(vec![1, 2, 3, 4,
+                             0, 0, 0, 0,
+                             0, 0, 0, 0,
+                             0, 0, 0, 0,
+                             0, 0, 0, 0,
+                             0, 0, 0, 0,
+                             0, 0, 0, 0,
+                             0, 0, 0, 0]);
+        assert_eq!(hash.to_u64(20), 0);
+
+        let hash = Hash(vec![0, 1, 5, 0,
+                             0, 0, 9, 0,
+                             0, 0, 0, 0,
+                             0, 0, 0, 0,
+                             0, 0, 0, 0,
+                             0, 0, 0, 0,
+                             0, 0, 0, 4,
+                             0, 0, 2, 1]);
+        assert_eq!(hash.to_u64(32), 513);
+    }
+
+    #[test]
+    fn big_endian_expand() {
+        let a = be_expand(0);
+        assert_eq!(a, vec![0, 0, 0, 0, 0, 0, 0, 0]);
+
+        let a = be_expand(513);
+        assert_eq!(a, vec![0, 0, 0, 0, 0, 0, 2, 1]);
+    }
+}
+
+fn be_expand(x: u64) -> Vec<u8> {
+    let mut tmp = Vec::with_capacity(8);
+    tmp.write_u64::<BigEndian>(x).unwrap();
+    tmp
 }
 
 #[derive(Debug, RustcEncodable, Clone)]
@@ -122,9 +158,18 @@ impl Block {
                            .expect("timestamp not found")
                            .as_u64()
                            .expect("timestamp not u64"),
-            nonces: [0; 3],
+            nonces: {
+                let nonces = json.get("nonces")
+                                 .expect("nonces not found")
+                                 .as_array()
+                                 .expect("nonces not array");
+                [nonces[0].as_u64().expect("nonce 0 not u64"),
+                 nonces[1].as_u64().expect("nonce 1 not u64"),
+                 nonces[2].as_u64().expect("nonce 2 not u64")]
+            },
         }
     }
+
     /// Gets a template for the next block.
     fn get_next() -> Block {
         let mut result = Client::new()
@@ -158,7 +203,7 @@ impl Block {
             .get("header")
             .expect("header not found");
         let block = Block::new(input);
-        println!("Got origin block with difficulty {}", block.difficulty);
+        println!("Got origin block {:?}\t\norigin hash: {:?}", block, block.hash_for_explorer());
         block
     }
 
@@ -192,15 +237,15 @@ impl Block {
 
         digest.input(&self.parent_id);
         digest.input(&self.root);
-        digest.input(&be_expand!(self.difficulty));
-        digest.input(&be_expand!(self.timestamp));
-        digest.input(&be_expand!(nonce));
+        digest.input(&be_expand(self.difficulty));
+        digest.input(&be_expand(self.timestamp));
+        digest.input(&be_expand(nonce));
         digest.input(&[self.version]);
 
         let mut hash = vec![0u8; 32];
         digest.result(&mut hash);
         Hash(hash)
-    }
+   }
 
     /// Computes the hash of a block header.
     ///
@@ -209,12 +254,12 @@ impl Block {
     fn hash_for_explorer(&self) -> Hash {
         let mut digest = Sha256::new();
 
-        digest.input(&self.parent_id);
-        digest.input(&self.root);
-        digest.input(&be_expand!(self.difficulty));
-        digest.input(&be_expand!(self.timestamp));
-        for i in 0..self.nonces.len() {
-            digest.input(&be_expand!(self.nonces[i]));
+        digest.input(&self.parent_id.0);
+        digest.input(&self.root.0);
+        digest.input(&be_expand(self.difficulty));
+        digest.input(&be_expand(self.timestamp));
+        for nonce in self.nonces.iter() {
+            digest.input(&be_expand(*nonce));
         }
         digest.input(&[self.version]);
 
@@ -232,7 +277,7 @@ impl Block {
                 let mut digest = Sha256::new();
                 digest.input_str(&contents);
 
-                let mut hash = vec![0u8; 32];
+                let mut hash = vec![0; 32];
                 digest.result(&mut hash);
                 Hash(hash)
             },
@@ -241,7 +286,6 @@ impl Block {
                 // nanoseconds since epoch
                 let time = time::now().to_timespec();
                 (time.sec as u64) * 1000000000u64 + (time.nsec as u64)
-                    + 5 * 60 * 1000 * 1000 * 1000
             },
             difficulty: next.difficulty,
             nonces: [0; 3],
@@ -255,25 +299,24 @@ impl Block {
             println!("nonces are equal!");
             return false;
         }
-        let hashes = [self.hash(0).to_u64(self.difficulty),
-                      self.hash(1).to_u64(self.difficulty),
-                      self.hash(2).to_u64(self.difficulty)];
-        if !(hashes[0] == hashes[1] && hashes[1] == hashes[2]) {
+        let hash_0 = self.hash(0).to_u64(self.difficulty);
+        let hash_1 = self.hash(1).to_u64(self.difficulty);
+        let hash_2 = self.hash(2).to_u64(self.difficulty);
+        if !(hash_0 == hash_1 && hash_1 == hash_2) {
             return false;
         }
         println!("\tBlock has valid proof of work: {} {} {}",
-                 hashes[0],
-                 hashes[1],
-                 hashes[2]);
+                 hash_0,
+                 hash_1,
+                 hash_2);
         true
     }
 }
 
 fn main() {
-    let mut start_time;
+    let mut start_time = time::now();
     let queue = Arc::new(RwLock::new(Queue {
         input_block: {
-            start_time = time::now();
             let next_block = Block::get_origin();
             Block::make_block(&next_block, BLOCK.to_string())
         },
@@ -287,7 +330,7 @@ fn main() {
     // Keep trying to solve blocks forever
     loop {
         yield_now();
-        if (time::now() - start_time).num_minutes() >= 9 {
+        if (time::now() - start_time).num_minutes() > MAX_TIME_TO_ATTEMPT {
             let mut queue = queue.write().unwrap();
             queue.input_block = {
                 println!("Took too long...");

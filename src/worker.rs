@@ -76,7 +76,7 @@ pub fn memory_intensive_worker(queue: Arc<RwLock<Queue>>, alpha: f64, beta: f64)
             i = j;
         }
 
-        println!("worker finished pre-step; {} triples generated", triples.len());
+        println!("worker finished pre-step; {} triples generated", n_alpha);
 
         for _ in 0..n_beta {
             if queue.read().unwrap().most_recent > time::now() {
