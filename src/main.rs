@@ -18,6 +18,7 @@ use rustc_serialize::hex::{FromHex, ToHex};
 
 use worker::{memory_intensive_worker, Queue};
 
+use std::env::args;
 use std::io::Read;
 use std::fmt;
 use std::ops::{Deref, Index, RangeFrom};
@@ -28,7 +29,6 @@ use std::sync::{Arc, RwLock};
 const NODE_URL: &'static str = "http://6857coin.csail.mit.edu:8080";
 /// A tunable parameter; how many worker threads to spawn.
 const NUM_WORKERS: usize = 4;
-const BLOCK: &'static str = "bxie, emzhang, zrneely";
 /// The number of minutes to try to solve a block for.
 const MAX_TIME_TO_ATTEMPT: i64 = 9;
 
@@ -316,11 +316,16 @@ impl Block {
 }
 
 fn main() {
+    let block_contents = {
+        let arguments: Vec<String> = args().collect();
+        arguments.get(1).expect("block contents must be provided on the command line").clone()
+    };
+
     let mut start_time = time::now();
     let queue = Arc::new(RwLock::new(Queue {
         input_block: {
             let next_block = Block::get_origin();
-            Block::make_block(&next_block, BLOCK.to_string())
+            Block::make_block(&next_block, block_contents.clone())
         },
         solved_blocks: Vec::new(),
         most_recent: time::now(),
@@ -338,7 +343,7 @@ fn main() {
                 println!("Took too long...");
                 start_time = time::now();
                 let next_block = Block::get_origin();
-                Block::make_block(&next_block, BLOCK.to_string())
+                Block::make_block(&next_block, block_contents.clone())
             };
             queue.most_recent = time::now();
         }
@@ -348,7 +353,7 @@ fn main() {
             for block in queue.solved_blocks.drain(..) {
                 assert!(block.has_valid_proof_of_work());
                 println!("{:?}", block);
-                block.send_to_server(BLOCK.to_string());
+                block.send_to_server(block_contents.clone());
             }
         }
     }
