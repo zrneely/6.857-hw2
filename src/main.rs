@@ -239,13 +239,14 @@ impl Block {
         digest.input(&self.root);
         digest.input(&be_expand(self.difficulty));
         digest.input(&be_expand(self.timestamp));
+        //digest.input(&be_expand(100));
         digest.input(&be_expand(nonce));
         digest.input(&[self.version]);
 
         let mut hash = vec![0u8; 32];
         digest.result(&mut hash);
         Hash(hash)
-   }
+    }
 
     /// Computes the hash of a block header.
     ///
