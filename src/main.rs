@@ -115,7 +115,7 @@ fn be_expand(x: u64) -> Vec<u8> {
 pub struct Block {
     version: u8,
     root: Hash,
-    parent_id: Hash,
+    parentid: Hash,
     difficulty: u64,
     timestamp: u64,
     nonces: [u64; 3],
@@ -144,7 +144,7 @@ impl Block {
                            .expect("root not string")
                            .from_hex()
                            .expect("root not hex")),
-            parent_id: Hash(json.get("parentid")
+            parentid: Hash(json.get("parentid")
                                 .expect("parentid not found")
                                 .as_string()
                                 .expect("parentid not string")
@@ -235,7 +235,7 @@ impl Block {
     fn hash_with_nonce(&self, nonce: u64) -> Hash {
         let mut digest = Sha256::new();
 
-        digest.input(&self.parent_id);
+        digest.input(&self.parentid);
         digest.input(&self.root);
         digest.input(&be_expand(self.difficulty));
         digest.input(&be_expand(self.timestamp));
@@ -255,7 +255,7 @@ impl Block {
     fn hash_for_explorer(&self) -> Hash {
         let mut digest = Sha256::new();
 
-        digest.input(&self.parent_id.0);
+        digest.input(&self.parentid.0);
         digest.input(&self.root.0);
         digest.input(&be_expand(self.difficulty));
         digest.input(&be_expand(self.timestamp));
@@ -282,7 +282,7 @@ impl Block {
                 digest.result(&mut hash);
                 Hash(hash)
             },
-            parent_id: next.hash_for_explorer(),
+            parentid: next.hash_for_explorer(),
             timestamp: {
                 // nanoseconds since epoch
                 let time = time::now().to_timespec();
