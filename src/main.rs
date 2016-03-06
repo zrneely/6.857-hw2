@@ -31,6 +31,8 @@ const NODE_URL: &'static str = "http://6857coin.csail.mit.edu:8080";
 const NUM_WORKERS: usize = 4;
 /// The number of minutes to try to solve a block for.
 const MAX_TIME_TO_ATTEMPT: i64 = 9;
+/// The max difficulty we'll attempt to solve.
+const MAX_DIFFICULTY: u64 = 64;
 
 #[derive(Clone)]
 struct Hash(Vec<u8>);
@@ -316,16 +318,30 @@ impl Block {
 }
 
 fn main() {
-    let block_contents = {
-        let arguments: Vec<String> = args().collect();
-        arguments.get(1).expect("block contents must be provided on the command line").clone()
+    let arguments: Vec<String> = args().collect();
+    let (block_contents, difficulty) = {
+        (
+            arguments.get(1)
+                     .expect("block contents must be provided on the command line"),
+            arguments.get(2)
+        )
     };
 
     let mut start_time = time::now();
     let queue = Arc::new(RwLock::new(Queue {
         input_block: {
             let next_block = Block::get_origin();
-            Block::make_block(&next_block, block_contents.clone())
+            if let Some(difficulty) = difficulty {
+                let difficulty = u64::from_str_radix(difficulty, 10)
+                    .expect("Could not parse difficulty!");
+                assert!(difficulty <= MAX_DIFFICULTY, "difficulty too high!");
+                let mut new_block = Block::make_block(&next_block, block_contents.clone());
+                assert!(new_block.difficulty <= difficulty, "cannot mine at a lower difficulty!");
+                new_block.difficulty = difficulty;
+                new_block
+            } else {
+                Block::make_block(&next_block, block_contents.clone())
+            }
         },
         solved_blocks: Vec::new(),
         most_recent: time::now(),

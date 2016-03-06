@@ -29,14 +29,14 @@ pub fn memory_intensive_worker(queue: Arc<RwLock<Queue>>, alpha: f64, beta: f64)
 
     let mut rng = thread_rng();
 
-    let n = 2f64.powf(block.difficulty as f64) as u64;
-    let n_alpha = 2f64.powf(alpha * block.difficulty as f64) as usize;
-    let n_beta = 2f64.powf(beta * block.difficulty as f64) as usize;
-
     'main: loop {
         println!("worker looping!");
         let start_time = time::now();
         let mut block = queue.read().unwrap().input_block.clone();
+
+        let n = 2f64.powf(block.difficulty as f64) as u64;
+        let n_alpha = 2f64.powf(alpha * block.difficulty as f64) as usize;
+        let n_beta = 2f64.powf(beta * block.difficulty as f64) as usize;
 
         let hash = {
             let block = block.clone();
@@ -107,65 +107,65 @@ pub fn memory_intensive_worker(queue: Arc<RwLock<Queue>>, alpha: f64, beta: f64)
     }
 }
 
-pub fn improved_worker(queue: Arc<RwLock<Queue>>, alpha: f64, beta: f64) {
-    // Assert that the constraint on alpha and beta holds
-    assert!((alpha + beta - 1f64).abs() <= 0.0001f64);
-
-    let mut rng = thread_rng();
-
-    let mut permuter = {
-        let mut rng: XorShiftRng = SeedableRng::from_seed([0; 4]);
-        move |key: u32, inp: u64| {
-            rng.reseed([key, key, inp as u32, (inp >> 32) as u32]);
-            rng.gen::<u64>()
-        }
-    };
-
-    let n = 2f64.pow(block.difficulty as f64) as u64;
-    let n_alpha = 2f64.powf(alpha * block.difficulty as f64) as usize;
-    let n_beta = 2f64.powf(beta * block.difficulty as f64) as usize;
-
-    'main: loop {
-        println!("improved worker looping!");
-        let start_time = time::now();
-        let mut block = queue.read().unwrap().input_block.clone();
-
-        let hash = {
-            let block = block.clone();
-            move |inp: u64| block.hash_with_nonce(inp).to_u64(block.difficulty)
-        };
-
-        let mut triples = Vec::with_capacity(n_alpha);
-
-        for i in 0..n_alpha {
-            let k = rng.gen::<u32>();
-            let composed = |inp: u64| hash(permuter(k, inp));
-
-            let (a, b) = cycle_finder(composed, rng.gen::<u64>());
-            triples.push(Triple {
-                image: composed(a),
-                pre_1: a,
-                pre_2: Some(b),
-            });
-        }
-        triples.sort_by_key(|t| t.image);
-
-        // TODO finish implementing this algorithm
-    }
-}
-
-/// Finds a 2-collision on the hash function f using Floyd's Cycle finding algorithm.
-pub fn cycle_finder<F>(f: F, x_0: u64) -> (u64, u64)
-        where F: Fn(u64) -> u64 {
-
-    let mut tortoise = f(x_0);
-    let mut hare = f(f(x_0));
-
-    while tortoise != hare {
-        tortoise = f(tortoise);
-        hare = f(f(hare));
-    }
-
-    // FIXME return the previous values, not the current ones
-    (tortoise, hare)
-}
+//pub fn improved_worker(queue: Arc<RwLock<Queue>>, alpha: f64, beta: f64) {
+//    // Assert that the constraint on alpha and beta holds
+//    assert!((alpha + beta - 1f64).abs() <= 0.0001f64);
+//
+//    let mut rng = thread_rng();
+//
+//    let permuter = {
+//        let mut rng: XorShiftRng = SeedableRng::from_seed([0; 4]);
+//        move |key: u32, inp: u64| {
+//            rng.reseed([key, key, inp as u32, (inp >> 32) as u32]);
+//            rng.gen::<u64>()
+//        }
+//    };
+//
+//    'main: loop {
+//        println!("improved worker looping!");
+//        let start_time = time::now();
+//        let mut block = queue.read().unwrap().input_block.clone();
+//
+//        let n = 2u64.pow(block.difficulty as u32);
+//        let n_alpha = 2f64.powf(alpha * block.difficulty as f64) as usize;
+//        let n_beta = 2f64.powf(beta * block.difficulty as f64) as usize;
+//
+//        let hash = {
+//            let block = block.clone();
+//            move |inp: u64| block.hash_with_nonce(inp).to_u64(block.difficulty)
+//        };
+//
+//        let mut triples = Vec::with_capacity(n_alpha);
+//
+//        for i in 0..n_alpha {
+//            let k = rng.gen::<u32>();
+//            let composed = |inp| hash(permuter(k, inp));
+//
+//            let (a, b) = cycle_finder(composed, rng.gen::<u64>());
+//            triples.push(Triple {
+//                image: composed(a),
+//                pre_1: a,
+//                pre_2: Some(b),
+//            });
+//        }
+//        triples.sort_by_key(|t| t.image);
+//
+//        // TODO finish implementing this algorithm
+//    }
+//}
+//
+///// Finds a 2-collision on the hash function f using Floyd's Cycle finding algorithm.
+//pub fn cycle_finder<F>(f: F, x_0: u64) -> (u64, u64)
+//        where F: Fn(u64) -> u64 {
+//
+//    let mut tortoise = f(x_0);
+//    let mut hare = f(f(x_0));
+//
+//    while tortoise != hare {
+//        tortoise = f(tortoise);
+//        hare = f(f(hare));
+//    }
+//
+//    // FIXME return the previous values, not the current ones
+//    (tortoise, hare)
+//}
