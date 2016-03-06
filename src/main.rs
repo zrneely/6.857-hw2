@@ -16,7 +16,7 @@ use rustc_serialize::{Encodable, Encoder};
 use rustc_serialize::json::{encode, Json};
 use rustc_serialize::hex::{FromHex, ToHex};
 
-use worker::{memory_intensive_worker, Queue};
+use worker::{memory_intensive_worker, Queue, Triple};
 
 use std::env::args;
 use std::io::Read;
@@ -29,6 +29,8 @@ use std::sync::{Arc, RwLock};
 const NODE_URL: &'static str = "http://6857coin.csail.mit.edu:8080";
 /// A tunable parameter; how many worker threads to spawn.
 const NUM_WORKERS: usize = 4;
+const ALPHA: f64 = 0.666;
+const BETA: f64 = 0.667;
 /// The number of minutes to try to solve a block for.
 const MAX_TIME_TO_ATTEMPT: i64 = 9;
 /// The max difficulty we'll attempt to solve.
@@ -317,6 +319,14 @@ impl Block {
     }
 }
 
+fn print_expected_memory(alpha: f64, difficulty: u64) {
+    println!("Expecting to allocate about {} MiB...", {
+        NUM_WORKERS * {
+            2f64.powf(alpha * difficulty as f64) as usize
+        } * std::mem::size_of::<Triple>() / 1024 / 1024
+    });
+}
+
 fn main() {
     let arguments: Vec<String> = args().collect();
     let (block_contents, difficulty) = {
@@ -334,9 +344,13 @@ fn main() {
             if let Some(difficulty) = difficulty {
                 let difficulty = u64::from_str_radix(difficulty, 10)
                     .expect("Could not parse difficulty!");
-                assert!(difficulty <= MAX_DIFFICULTY, "difficulty too high!");
+                assert!(difficulty <= MAX_DIFFICULTY,
+                        "difficulty too high!");
+                assert!(next_block.difficulty <= difficulty,
+                        "cannot mine at a lower difficulty!");
+                print_expected_memory(ALPHA, difficulty);
+
                 let mut new_block = Block::make_block(&next_block, block_contents.clone());
-                assert!(new_block.difficulty <= difficulty, "cannot mine at a lower difficulty!");
                 new_block.difficulty = difficulty;
                 new_block
             } else {
@@ -346,9 +360,10 @@ fn main() {
         solved_blocks: Vec::new(),
         most_recent: time::now(),
     }));
+
     for _ in 0..NUM_WORKERS {
         let queue_clone = queue.clone();
-        spawn(|| memory_intensive_worker(queue_clone, 0.666f64, 0.667f64));
+        spawn(|| memory_intensive_worker(queue_clone, ALPHA, BETA));
     }
     // Keep trying to solve blocks forever
     loop {

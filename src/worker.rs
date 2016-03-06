@@ -8,7 +8,7 @@ use std::sync::{Arc, RwLock};
 use Block;
 
 #[derive(Clone, Debug, Default)]
-struct Triple {
+pub struct Triple {
     image: u64,
     pre_1: u64,
     pre_2: Option<u64>,
@@ -44,13 +44,16 @@ pub fn memory_intensive_worker(queue: Arc<RwLock<Queue>>, alpha: f64, beta: f64)
         };
 
         // Heap-allocated lists
-        let mut triples = vec![Triple::default(); n_alpha];
+        let mut triples = Vec::with_capacity(n_alpha);
 
         let range = Range::new(0, n);
-        for i in 0..n_alpha {
+        for _ in 0..n_alpha {
             let a = range.ind_sample(&mut rng);
-            triples[i].image = hash(a);
-            triples[i].pre_1 = a;
+            triples.push(Triple {
+                image: hash(a),
+                pre_1: a,
+                pre_2: None,
+            });
         }
         triples.sort_by_key(|t| t.image);
 
